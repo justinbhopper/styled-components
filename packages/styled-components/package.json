@@ -1,6 +1,6 @@
 {
   "name": "styled-components",
-  "version": "6.0.0-rc.2",
+  "version": "6.0.0-rc.3",
   "description": "Visual primitives for the component age. Use the best bits of ES6 and CSS to style your apps without stress",
   "types": "dist/index.d.ts",
   "main": "dist/styled-components.cjs.js",
@@ -65,6 +65,7 @@
     "@babel/traverse": "^7.21.2",
     "@emotion/unitless": "^0.8.0",
     "css-to-react-native": "^3.2.0",
+    "postcss": "^8.4.23",
     "shallowequal": "^1.1.0",
     "stylis": "^4.2.0",
     "tslib": "^2.5.0"
