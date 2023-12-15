@@ -1,7 +1,7 @@
 import React, { PropsWithChildren } from 'react';
-import { Text, View, ViewProps } from 'react-native';
+import { Image, Text, View, ViewProps } from 'react-native';
 import TestRenderer from 'react-test-renderer';
-import styled, { ThemeProvider } from '../';
+import styled, { ThemeProvider, css, toStyleSheet } from '../';
 
 // NOTE: These tests are like the ones for Web but a "light-version" of them
 // This is mostly due to the similar logic
@@ -138,6 +138,20 @@ describe('native', () => {
     expect(wrapper.root.findByType(Text)).not.toBeUndefined();
   });
 
+  it('should not add different border values for Image component as its not supported', () => {
+    const Comp = styled.Image`
+      border-width: 10px;
+      border-color: red;
+    `;
+
+    const loremPicsumUri = 'https://picsum.photos/200/300';
+
+    const wrapper = TestRenderer.create(<Comp source={{ uri: loremPicsumUri }} />);
+    const image = wrapper.root.findByType(Image);
+
+    expect(image.props.style).toEqual({ borderWidth: 10, borderColor: 'red' });
+  });
+
   describe('attrs', () => {
     beforeEach(() => jest.spyOn(console, 'warn').mockImplementation(() => {}));
 
@@ -151,8 +165,17 @@ describe('native', () => {
       });
     });
 
+    interface TestProps {
+      first?: string;
+      second?: string;
+      test?: string | boolean;
+      copy?: string;
+    }
+
+    const ComponentWithProps = styled.View<TestProps>``;
+
     it('passes simple props on', () => {
-      const Comp = styled.View.attrs(() => ({
+      const Comp = styled(ComponentWithProps).attrs(() => ({
         test: true,
       }))``;
 
@@ -166,7 +189,7 @@ describe('native', () => {
     });
 
     it('calls an attr-function with context', () => {
-      const Comp = styled.View.attrs<{ copy: string; test: string }>(p => ({
+      const Comp = styled(ComponentWithProps).attrs<{ copy?: string; test: string }>(p => ({
         copy: p.test,
       }))``;
 
@@ -182,13 +205,15 @@ describe('native', () => {
     });
 
     it('merges multiple calls', () => {
-      const Comp = styled.View.attrs(() => ({
-        first: 'first',
-        test: '_',
-      })).attrs(() => ({
-        second: 'second',
-        test: 'test',
-      }))``;
+      const Comp = styled(ComponentWithProps)
+        .attrs(() => ({
+          first: 'first',
+          test: '_',
+        }))
+        .attrs(() => ({
+          second: 'second',
+          test: 'test',
+        }))``;
 
       const wrapper = TestRenderer.create(<Comp />);
       const view = wrapper.root.findByType(View);
@@ -202,13 +227,17 @@ describe('native', () => {
     });
 
     it('merges multiple fn calls', () => {
-      const Comp = styled.View.attrs(() => ({
-        first: 'first',
-        test: '_',
-      })).attrs(() => ({
-        second: 'second',
-        test: 'test',
-      }))``;
+      const ComponentWithProps = styled.View<TestProps>``;
+
+      const Comp = styled(ComponentWithProps)
+        .attrs(() => ({
+          first: 'first',
+          test: '_',
+        }))
+        .attrs(() => ({
+          second: 'second',
+          test: 'test',
+        }))``;
 
       const wrapper = TestRenderer.create(<Comp />);
       const view = wrapper.root.findByType(View);
@@ -222,7 +251,7 @@ describe('native', () => {
     });
 
     it('merges attrs when inheriting SC', () => {
-      const Parent = styled.View.attrs(() => ({
+      const Parent = styled(ComponentWithProps).attrs(() => ({
         first: 'first',
       }))``;
 
@@ -339,6 +368,15 @@ describe('native', () => {
       const text = wrapper.root.findByType(Text);
 
       expect(text.props.style).toMatchObject({ color: 'red' });
+    });
+
+    it('convert css to styleSheet', () => {
+      const cssStyle = css`
+        background-color: red;
+        border-width: 10px;
+      `;
+
+      expect(toStyleSheet(cssStyle)).toEqual({ backgroundColor: 'red', borderWidth: 10 });
     });
   });
 

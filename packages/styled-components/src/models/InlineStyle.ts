@@ -33,7 +33,9 @@ export default function makeInlineStyleClass<Props extends object>(styleSheet: S
 
     generateStyleObject(executionContext: ExecutionContext & Props) {
       // keyframes, functions, and component selectors are not allowed for React Native
-      const flatCSS = joinStringArray(flatten(this.rules, executionContext) as string[]);
+      const flatCSS = joinStringArray(
+        flatten(this.rules as RuleSet<object>, executionContext) as string[]
+      );
       const hash = generateComponentId(flatCSS);
 
       if (!generated[hash]) {
@@ -48,7 +50,13 @@ export default function makeInlineStyleClass<Props extends object>(styleSheet: S
           }
         });
 
-        const styleObject = transformDeclPairs(declPairs);
+        // RN currently does not support differing values for the border color of Image
+        // components (but does for View). It is almost impossible to tell whether we'll have
+        // support, so we'll just disable multiple values here.
+        // https://github.com/styled-components/styled-components/issues/4181
+
+        const styleObject = transformDeclPairs(declPairs, ['borderWidth', 'borderColor']);
+
         const styles = styleSheet.create({
           generated: styleObject,
         });

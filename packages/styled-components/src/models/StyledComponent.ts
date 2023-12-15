@@ -1,8 +1,10 @@
+import isPropValid from '@emotion/is-prop-valid';
 import React, { createElement, Ref, useDebugValue } from 'react';
 import { SC_VERSION } from '../constants';
 import type {
   AnyComponent,
   Attrs,
+  BaseObject,
   Dict,
   ExecutionContext,
   ExecutionProps,
@@ -11,7 +13,6 @@ import type {
   IStyledStatics,
   OmitNever,
   RuleSet,
-  StyledComponentProps,
   StyledOptions,
   WebTarget,
 } from '../types';
@@ -19,7 +20,7 @@ import { checkDynamicCreation } from '../utils/checkDynamicCreation';
 import createWarnTooManyClasses from '../utils/createWarnTooManyClasses';
 import determineTheme from '../utils/determineTheme';
 import domElements from '../utils/domElements';
-import { EMPTY_OBJECT } from '../utils/empties';
+import { EMPTY_ARRAY, EMPTY_OBJECT } from '../utils/empties';
 import escape from '../utils/escape';
 import generateComponentId from '../utils/generateComponentId';
 import generateDisplayName from '../utils/generateDisplayName';
@@ -37,7 +38,10 @@ import { DefaultTheme, ThemeContext } from './ThemeProvider';
 const identifiers: { [key: string]: number } = {};
 
 /* We depend on components having unique IDs */
-function generateId(displayName?: string, parentComponentId?: string): string {
+function generateId(
+  displayName?: string | undefined,
+  parentComponentId?: string | undefined
+): string {
   const name = typeof displayName !== 'string' ? 'sc' : escape(displayName);
   // Ensure that no displayName can lead to duplicate componentIds
   identifiers[name] = (identifiers[name] || 0) + 1;
@@ -51,15 +55,14 @@ function generateId(displayName?: string, parentComponentId?: string): string {
   return parentComponentId ? `${parentComponentId}-${componentId}` : componentId;
 }
 
-function useInjectedStyle<T extends object>(
+function useInjectedStyle<T extends ExecutionContext>(
   componentStyle: ComponentStyle,
-  isStatic: boolean,
   resolvedAttrs: T
 ) {
   const ssc = useStyleSheetContext();
 
   const className = componentStyle.generateAndInjectStyles(
-    isStatic ? EMPTY_OBJECT : resolvedAttrs,
+    resolvedAttrs,
     ssc.styleSheet,
     ssc.stylis
   );
@@ -70,12 +73,13 @@ function useInjectedStyle<T extends object>(
 }
 
 function resolveContext<Props extends object>(
-  attrs: Attrs<unknown>[],
-  props: React.HTMLAttributes<Element> & Props,
+  attrs: Attrs<React.HTMLAttributes<Element> & Props>[],
+  props: React.HTMLAttributes<Element> & ExecutionProps & Props,
   theme: DefaultTheme
 ) {
-  const context: ExecutionContext &
-    Props & { class?: string; className?: string; ref?: React.Ref<any>; style?: any } = {
+  const context: React.HTMLAttributes<Element> &
+    ExecutionContext &
+    Props & { [key: string]: any; class?: string; ref?: React.Ref<any> } = {
     ...props,
     // unset, add `props.className` back at the end so props always "wins"
     className: undefined,
@@ -88,13 +92,12 @@ function resolveContext<Props extends object>(
     const resolvedAttrDef = isFunction(attrDef) ? attrDef(context) : attrDef;
 
     for (const key in resolvedAttrDef) {
-      // @ts-expect-error bad types
-      context[key] =
+      context[key as keyof typeof context] =
         key === 'className'
           ? joinStrings(context[key] as string | undefined, resolvedAttrDef[key] as string)
           : key === 'style'
-          ? { ...context[key], ...resolvedAttrDef[key] }
-          : resolvedAttrDef[key];
+            ? { ...context[key], ...resolvedAttrDef[key] }
+            : resolvedAttrDef[key as keyof typeof resolvedAttrDef];
     }
   }
 
@@ -105,11 +108,12 @@ function resolveContext<Props extends object>(
   return context;
 }
 
-function useStyledComponentImpl<Target extends WebTarget, Props extends ExecutionProps>(
-  forwardedComponent: IStyledComponent<'web', Target, Props>,
-  props: Props,
-  forwardedRef: Ref<Element>,
-  isStatic: boolean
+let seenUnknownProps = new Set();
+
+function useStyledComponentImpl<Props extends object>(
+  forwardedComponent: IStyledComponent<'web', Props>,
+  props: ExecutionProps & Props,
+  forwardedRef: Ref<Element>
 ) {
   const {
     attrs: componentAttrs,
@@ -131,7 +135,7 @@ function useStyledComponentImpl<Target extends WebTarget, Props extends Executio
   // should be an immutable value, but behave for now.
   const theme = determineTheme(props, contextTheme, defaultProps) || EMPTY_OBJECT;
 
-  const context: Dict<any> = resolveContext<Props>(componentAttrs, props, theme);
+  const context = resolveContext<Props>(componentAttrs, props, theme);
   const elementToBeCreated: WebTarget = context.as || target;
   const propsForElement: Dict<any> = {};
 
@@ -145,12 +149,26 @@ function useStyledComponentImpl<Target extends WebTarget, Props extends Executio
       propsForElement.as = context.forwardedAs;
     } else if (!shouldForwardProp || shouldForwardProp(key, elementToBeCreated)) {
       propsForElement[key] = context[key];
+
+      if (
+        !shouldForwardProp &&
+        process.env.NODE_ENV === 'development' &&
+        !isPropValid(key) &&
+        !seenUnknownProps.has(key) &&
+        // Only warn on DOM Element.
+        domElements.has(elementToBeCreated as any)
+      ) {
+        seenUnknownProps.add(key);
+        console.warn(
+          `styled-components: it looks like an unknown prop "${key}" is being sent through to the DOM, which will likely trigger a React console error. If you would like automatic filtering of unknown props, you can opt-into that behavior via \`<StyleSheetManager shouldForwardProp={...}>\` (connect an API like \`@emotion/is-prop-valid\`) or consider using transient props (\`$\` prefix for automatic filtering.)`
+        );
+      }
     }
   }
 
-  const generatedClassName = useInjectedStyle(componentStyle, isStatic, context);
+  const generatedClassName = useInjectedStyle(componentStyle, context);
 
-  if (process.env.NODE_ENV !== 'production' && !isStatic && forwardedComponent.warnTooManyClasses) {
+  if (process.env.NODE_ENV !== 'production' && forwardedComponent.warnTooManyClasses) {
     forwardedComponent.warnTooManyClasses(generatedClassName);
   }
 
@@ -177,24 +195,22 @@ function useStyledComponentImpl<Target extends WebTarget, Props extends Executio
 
 function createStyledComponent<
   Target extends WebTarget,
-  OtherProps extends object,
-  Statics extends object = object
+  OuterProps extends object,
+  Statics extends object = BaseObject,
 >(
   target: Target,
-  options: StyledOptions<'web', OtherProps>,
-  rules: RuleSet<OtherProps>
-): ReturnType<IStyledComponentFactory<'web', Target, OtherProps, never, Statics>> {
+  options: StyledOptions<'web', OuterProps>,
+  rules: RuleSet<OuterProps>
+): ReturnType<IStyledComponentFactory<'web', Target, OuterProps, Statics>> {
   const isTargetStyledComp = isStyledComponent(target);
-  const styledComponentTarget = target as IStyledComponent<'web', Target, OtherProps>;
+  const styledComponentTarget = target as IStyledComponent<'web', OuterProps>;
   const isCompositeComponent = !isTag(target);
 
   const {
+    attrs = EMPTY_ARRAY,
     componentId = generateId(options.displayName, options.parentComponentId),
     displayName = generateDisplayName(target),
   } = options;
-  const attrs = (options.attrs ?? []) as Attrs<
-    StyledComponentProps<'web', Target, OtherProps, never>
-  >[];
 
   const styledComponentId =
     options.displayName && options.componentId
@@ -204,8 +220,8 @@ function createStyledComponent<
   // fold the underlying StyledComponent attrs up (implicit extend)
   const finalAttrs =
     isTargetStyledComp && styledComponentTarget.attrs
-      ? styledComponentTarget.attrs.concat(attrs).filter(Boolean)
-      : attrs;
+      ? styledComponentTarget.attrs.concat(attrs as unknown as Attrs<OuterProps>[]).filter(Boolean)
+      : (attrs as Attrs<OuterProps>[]);
 
   let { shouldForwardProp } = options;
 
@@ -230,23 +246,19 @@ function createStyledComponent<
     isTargetStyledComp ? (styledComponentTarget.componentStyle as ComponentStyle) : undefined
   );
 
-  // statically styled-components don't need to build an execution context object,
-  // and shouldn't be increasing the number of class names
-  const isStatic = componentStyle.isStatic && attrs.length === 0;
-  function forwardRef(props: ExecutionProps & OtherProps, ref: Ref<Element>) {
-    return useStyledComponentImpl<Target, OtherProps>(WrappedStyledComponent, props, ref, isStatic);
+  function forwardRefRender(props: ExecutionProps & OuterProps, ref: Ref<Element>) {
+    return useStyledComponentImpl<OuterProps>(WrappedStyledComponent, props, ref);
   }
 
-  forwardRef.displayName = displayName;
+  forwardRefRender.displayName = displayName;
 
   /**
    * forwardRef creates a new interim component, which we'll take advantage of
    * instead of extending ParentComponent to create _another_ interim class
    */
-  let WrappedStyledComponent = React.forwardRef(forwardRef) as unknown as IStyledComponent<
+  let WrappedStyledComponent = React.forwardRef(forwardRefRender) as unknown as IStyledComponent<
     'web',
-    typeof target,
-    OtherProps
+    any
   > &
     Statics;
   WrappedStyledComponent.attrs = finalAttrs;
@@ -303,7 +315,7 @@ function createStyledComponent<
         shouldForwardProp: true,
         styledComponentId: true,
         target: true,
-      } as { [key in keyof OmitNever<IStyledStatics<'web', OtherProps>>]: true }
+      } as { [key in keyof OmitNever<IStyledStatics<'web', OuterProps>>]: true }
     );
   }
 

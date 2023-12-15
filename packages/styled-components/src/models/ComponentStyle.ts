@@ -1,6 +1,6 @@
 import { SC_VERSION } from '../constants';
 import StyleSheet from '../sheet';
-import { RuleSet, Stringifier } from '../types';
+import { ExecutionContext, RuleSet, Stringifier } from '../types';
 import flatten from '../utils/flatten';
 import generateName from '../utils/generateAlphabeticName';
 import { hash, phash } from '../utils/hash';
@@ -20,7 +20,7 @@ export default class ComponentStyle {
   rules: RuleSet<any>;
   staticRulesId: string;
 
-  constructor(rules: RuleSet<any>, componentId: string, baseStyle?: ComponentStyle) {
+  constructor(rules: RuleSet<any>, componentId: string, baseStyle?: ComponentStyle | undefined) {
     this.rules = rules;
     this.staticRulesId = '';
     this.isStatic =
@@ -37,7 +37,7 @@ export default class ComponentStyle {
   }
 
   generateAndInjectStyles(
-    executionContext: Object,
+    executionContext: ExecutionContext,
     styleSheet: StyleSheet,
     stylis: Stringifier
   ): string {
@@ -78,7 +78,8 @@ export default class ComponentStyle {
           const partString = joinStringArray(
             flatten(partRule, executionContext, styleSheet, stylis) as string[]
           );
-          dynamicHash = phash(dynamicHash, partString);
+          // The same value can switch positions in the array, so we include "i" in the hash.
+          dynamicHash = phash(dynamicHash, partString + i);
           css += partString;
         }
       }
